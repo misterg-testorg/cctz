@@ -12,14 +12,14 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#include "time_zone.h"
+#include "cctz/time_zone.h"
 
 #include <chrono>
-#include <cstdint>
 #include <iomanip>
 #include <sstream>
 #include <string>
 
+#include "cctz/civil_time.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
 
@@ -50,7 +50,7 @@ namespace {
     EXPECT_EQ(ss, al.cs.second());                                \
     EXPECT_EQ(off, al.offset);                                    \
     EXPECT_TRUE(isdst == al.is_dst);                              \
-    EXPECT_EQ(zone, al.abbr);                                     \
+    EXPECT_STREQ(zone, al.abbr);                                  \
   } while (0)
 
 const char RFC3339_full[] = "%Y-%m-%dT%H:%M:%E*S%Ez";
@@ -96,6 +96,36 @@ TEST(Format, TimePointResolution) {
             format(kFmt, time_point_cast<minutes>(t0), utc));
   EXPECT_EQ("03:00:00",
             format(kFmt, time_point_cast<hours>(t0), utc));
+}
+
+TEST(Format, TimePointExtendedResolution) {
+  const char kFmt[] = "%H:%M:%E*S";
+  const time_zone utc = utc_time_zone();
+  const time_point<sys_seconds> tp =
+      std::chrono::time_point_cast<sys_seconds>(
+          std::chrono::system_clock::from_time_t(0)) +
+      std::chrono::hours(12) + std::chrono::minutes(34) +
+      std::chrono::seconds(56);
+
+  EXPECT_EQ(
+      "12:34:56.123456789012345",
+      detail::format(kFmt, tp, detail::femtoseconds(123456789012345), utc));
+  EXPECT_EQ(
+      "12:34:56.012345678901234",
+      detail::format(kFmt, tp, detail::femtoseconds(12345678901234), utc));
+  EXPECT_EQ(
+      "12:34:56.001234567890123",
+      detail::format(kFmt, tp, detail::femtoseconds(1234567890123), utc));
+  EXPECT_EQ(
+      "12:34:56.000123456789012",
+      detail::format(kFmt, tp, detail::femtoseconds(123456789012), utc));
+
+  EXPECT_EQ("12:34:56.000000000000123",
+            detail::format(kFmt, tp, detail::femtoseconds(123), utc));
+  EXPECT_EQ("12:34:56.000000000000012",
+            detail::format(kFmt, tp, detail::femtoseconds(12), utc));
+  EXPECT_EQ("12:34:56.000000000000001",
+            detail::format(kFmt, tp, detail::femtoseconds(1), utc));
 }
 
 TEST(Format, Basics) {
@@ -546,6 +576,26 @@ TEST(Parse, TimePointResolution) {
   EXPECT_EQ("03:00:00", format(kFmt, tp_h, utc));
 }
 
+TEST(Parse, TimePointExtendedResolution) {
+  const char kFmt[] = "%H:%M:%E*S";
+  const time_zone utc = utc_time_zone();
+
+  time_point<sys_seconds> tp;
+  detail::femtoseconds fs;
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.123456789012345", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.123456789012345", detail::format(kFmt, tp, fs, utc));
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.012345678901234", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.012345678901234", detail::format(kFmt, tp, fs, utc));
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.001234567890123", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.001234567890123", detail::format(kFmt, tp, fs, utc));
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.000000000000123", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.000000000000123", detail::format(kFmt, tp, fs, utc));
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.000000000000012", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.000000000000012", detail::format(kFmt, tp, fs, utc));
+  EXPECT_TRUE(detail::parse(kFmt, "12:34:56.000000000000001", utc, &tp, &fs));
+  EXPECT_EQ("12:34:56.000000000000001", detail::format(kFmt, tp, fs, utc));
+}
+
 TEST(Parse, Basics) {
   time_zone tz = utc_time_zone();
   time_point<nanoseconds> tp = system_clock::from_time_t(1234567890);
@@ -791,8 +841,12 @@ TEST(Parse, LocaleSpecific) {
 
   tp = reset;
   EXPECT_TRUE(parse("%x", "02/03/04", tz, &tp));
-  EXPECT_EQ(2, convert(tp, tz).month());
-  EXPECT_EQ(3, convert(tp, tz).day());
+  if (convert(tp, tz).month() == 2) {
+    EXPECT_EQ(3, convert(tp, tz).day());
+  } else {
+    EXPECT_EQ(2, convert(tp, tz).day());
+    EXPECT_EQ(3, convert(tp, tz).month());
+  }
   EXPECT_EQ(2004, convert(tp, tz).year());
 
   tp = reset;
@@ -1022,10 +1076,10 @@ TEST(Parse, ExtendedSubeconds) {
   // parsed, while the second (and any subsecond field >=2^31) failed.
   time_point<nanoseconds> tp = unix_epoch;
   EXPECT_TRUE(parse("%E*f", "2147483647", tz, &tp));
-  EXPECT_EQ(unix_epoch + nanoseconds(214748364) + nanoseconds(1) / 2, tp);
+  EXPECT_EQ(unix_epoch + nanoseconds(214748364), tp);
   tp = unix_epoch;
   EXPECT_TRUE(parse("%E*f", "2147483648", tz, &tp));
-  EXPECT_EQ(unix_epoch + nanoseconds(214748364) + nanoseconds(3) / 4, tp);
+  EXPECT_EQ(unix_epoch + nanoseconds(214748364), tp);
 
   // We should also be able to specify long strings of digits far
   // beyond the current resolution and have them convert the same way.
@@ -1033,7 +1087,7 @@ TEST(Parse, ExtendedSubeconds) {
   EXPECT_TRUE(parse(
       "%E*f", "214748364801234567890123456789012345678901234567890123456789",
       tz, &tp));
-  EXPECT_EQ(unix_epoch + nanoseconds(214748364) + nanoseconds(3) / 4, tp);
+  EXPECT_EQ(unix_epoch + nanoseconds(214748364), tp);
 }
 
 TEST(Parse, ExtendedSubecondsScan) {
@@ -1155,6 +1209,49 @@ TEST(Parse, RFC3339Format) {
   EXPECT_EQ(tp, tp2);
 }
 
+TEST(Parse, MaxRange) {
+  const time_zone utc = utc_time_zone();
+  time_point<sys_seconds> tp;
+
+  // tests the upper limit using +00:00 offset
+  EXPECT_TRUE(
+      parse(RFC3339_sec, "292277026596-12-04T15:30:07+00:00", utc, &tp));
+  EXPECT_EQ(tp, time_point<sys_seconds>::max());
+  EXPECT_FALSE(
+      parse(RFC3339_sec, "292277026596-12-04T15:30:08+00:00", utc, &tp));
+
+  // tests the upper limit using -01:00 offset
+  EXPECT_TRUE(
+      parse(RFC3339_sec, "292277026596-12-04T14:30:07-01:00", utc, &tp));
+  EXPECT_EQ(tp, time_point<sys_seconds>::max());
+  EXPECT_FALSE(
+      parse(RFC3339_sec, "292277026596-12-04T15:30:07-01:00", utc, &tp));
+
+  // tests the lower limit using +00:00 offset
+  EXPECT_TRUE(
+      parse(RFC3339_sec, "-292277022657-01-27T08:29:52+00:00", utc, &tp));
+  EXPECT_EQ(tp, time_point<sys_seconds>::min());
+  EXPECT_FALSE(
+      parse(RFC3339_sec, "-292277022657-01-27T08:29:51+00:00", utc, &tp));
+
+  // tests the lower limit using +01:00 offset
+  EXPECT_TRUE(
+      parse(RFC3339_sec, "-292277022657-01-27T09:29:52+01:00", utc, &tp));
+  EXPECT_EQ(tp, time_point<sys_seconds>::min());
+  EXPECT_FALSE(
+      parse(RFC3339_sec, "-292277022657-01-27T08:29:51+01:00", utc, &tp));
+
+  // tests max/min civil-second overflow
+  EXPECT_FALSE(parse(RFC3339_sec, "9223372036854775807-12-31T23:59:59-00:01",
+                     utc, &tp));
+  EXPECT_FALSE(parse(RFC3339_sec, "-9223372036854775808-01-01T00:00:00+00:01",
+                     utc, &tp));
+
+  // TODO: Add tests that parsing times with fractional seconds overflow
+  // appropriately. This can't be done until cctz::parse() properly detects
+  // overflow when combining the chrono seconds and femto.
+}
+
 //
 // Roundtrip test for format()/parse().
 //
@@ -1181,6 +1278,10 @@ TEST(FormatParse, RoundTrip) {
     EXPECT_EQ(in, out);  // RFC1123_full includes %z
   }
 
+#if defined(_WIN32) || defined(_WIN64)
+  // Initial investigations indicate the %c does not roundtrip on Windows.
+  // TODO: Figure out what is going on here (perhaps a locale problem).
+#else
   // Even though we don't know what %c will produce, it should roundtrip,
   // but only in the 0-offset timezone.
   {
@@ -1190,6 +1291,25 @@ TEST(FormatParse, RoundTrip) {
     EXPECT_TRUE(parse("%c", s, utc, &out)) << s;
     EXPECT_EQ(in, out);
   }
+#endif
+}
+
+TEST(FormatParse, RoundTripDistantFuture) {
+  const time_zone utc = utc_time_zone();
+  const time_point<sys_seconds> in = time_point<sys_seconds>::max();
+  const std::string s = format(RFC3339_full, in, utc);
+  time_point<sys_seconds> out;
+  EXPECT_TRUE(parse(RFC3339_full, s, utc, &out)) << s;
+  EXPECT_EQ(in, out);
+}
+
+TEST(FormatParse, RoundTripDistantPast) {
+  const time_zone utc = utc_time_zone();
+  const time_point<sys_seconds> in = time_point<sys_seconds>::min();
+  const std::string s = format(RFC3339_full, in, utc);
+  time_point<sys_seconds> out;
+  EXPECT_TRUE(parse(RFC3339_full, s, utc, &out)) << s;
+  EXPECT_EQ(in, out);
 }
 
 }  // namespace cctz
