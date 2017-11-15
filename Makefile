@@ -17,47 +17,37 @@
 # and can't compile the sources in their own build system.
 #
 # Suggested usage:
-#
-#   To build locally:
-#     make -C build -f ../Makefile SRC=../ -j `nproc`
-#
-#   To build/install a versioned shared library on Linux:
-#     make -C build -f ../Makefile SRC=../ -j `nproc` \
-#         SHARED_LDFLAGS='-shared -Wl,-soname,libcctz.so.2' \
-#         CCTZ_SHARED_LIB=libcctz.so.2.0 \
-#         install install_shared_lib
+#   make -C build -f ../Makefile SRC=../ -j `nproc`
 
 # local configuration
-CXX ?= g++
-CXXFLAGS ?= -O3
-STD ?= c++11
-LDFLAGS ?= -O3
-PREFIX ?= /usr/local
-DESTDIR ?=
+CXX = g++
+STD = c++11
+OPT = -O
+PREFIX = /usr/local
 
 # possible support for googletest
 ## TESTS = civil_time_test time_zone_lookup_test time_zone_format_test
 ## TEST_FLAGS = ...
 ## TEST_LIBS = ...
 
-VPATH = $(SRC)src:$(SRC)examples
-CXXFLAGS += -g -Wall -I$(SRC)include -std=$(STD) \
-            $(TEST_FLAGS) -fPIC -MMD
+VPATH = $(SRC)include:$(SRC)src:$(SRC)examples
+CC = $(CXX)
+CPPFLAGS = -Wall -I$(SRC)include -std=$(STD) -pthread \
+	   $(TEST_FLAGS) $(OPT) -fPIC -MMD
 ARFLAGS = rcs
-LINK.o = $(LINK.cc)
-LDLIBS += $(TEST_LIBS)
-SHARED_LDFLAGS = -shared
-INSTALL = install
+LDFLAGS = -pthread
+LDLIBS = $(TEST_LIBS)
 
-CCTZ = cctz
-CCTZ_LIB = lib$(CCTZ).a
-CCTZ_SHARED_LIB = lib$(CCTZ).so
+SUDO =
 
-CCTZ_HDRS = $(SRC)include/cctz/*.h
+CCTZ_LIB = libcctz.a
+
+CCTZ_HDRS =			\
+	civil_time.h		\
+	civil_time_detail.h	\
+	time_zone.h
 
 CCTZ_OBJS =			\
-	civil_time_detail.o	\
-	time_zone_fixed.o	\
 	time_zone_format.o	\
 	time_zone_if.o		\
 	time_zone_impl.o	\
@@ -73,32 +63,23 @@ all: $(TESTS) $(TOOLS) $(EXAMPLES)
 
 $(TESTS) $(TOOLS) $(EXAMPLES): $(CCTZ_LIB)
 
-$(TESTS:=.o) $(TOOLS:=.o) $(EXAMPLES:=.o):
-
 $(CCTZ_LIB): $(CCTZ_OBJS)
 	$(AR) $(ARFLAGS) $@ $(CCTZ_OBJS)
-
-$(CCTZ_SHARED_LIB): $(CCTZ_OBJS)
-	$(LINK.o) $(LDFLAGS) $(SHARED_LDFLAGS) -o $@ $(CCTZ_OBJS)
 
 install: install_hdrs install_lib
 
 install_hdrs: $(CCTZ_HDRS)
-	$(INSTALL) -d $(DESTDIR)$(PREFIX)/include/cctz
-	$(INSTALL) -m 644 -p $? $(DESTDIR)$(PREFIX)/include/cctz
+	$(SUDO) mkdir -p $(PREFIX)/include
+	$(SUDO) cp -p $? $(PREFIX)/include
 
 install_lib: $(CCTZ_LIB)
-	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib
-	$(INSTALL) -m 644 -p $? $(DESTDIR)$(PREFIX)/lib
-
-install_shared_lib: $(CCTZ_SHARED_LIB)
-	$(INSTALL) -d $(DESTDIR)$(PREFIX)/lib
-	$(INSTALL) -m 644 -p $? $(DESTDIR)$(PREFIX)/lib
+	$(SUDO) mkdir -p $(PREFIX)/lib
+	$(SUDO) cp -p $? $(PREFIX)/lib
 
 clean:
-	@$(RM) $(EXAMPLES:=.dSYM) $(EXAMPLES:=.o) $(EXAMPLES:=.d) $(EXAMPLES)
-	@$(RM) $(TOOLS:=.dSYM) $(TOOLS:=.o) $(TOOLS:=.d) $(TOOLS)
-	@$(RM) $(TESTS:=.dSYM) $(TESTS:=.o) $(TESTS:=.d) $(TESTS)
-	@$(RM) $(CCTZ_OBJS) $(CCTZ_OBJS:.o=.d) $(CCTZ_LIB) $(CCTZ_SHARED_LIB)
+	@$(RM) -r $(EXAMPLES:=.dSYM) $(EXAMPLES:=.o) $(EXAMPLES:=.d) $(EXAMPLES)
+	@$(RM) -r $(TOOLS:=.dSYM) $(TOOLS:=.o) $(TOOLS:=.d) $(TOOLS)
+	@$(RM) -r $(TESTS:=.dSYM) $(TESTS:=.o) $(TESTS:=.d) $(TESTS)
+	@$(RM) $(CCTZ_OBJS) $(CCTZ_OBJS:.o=.d) $(CCTZ_LIB)
 
 -include $(CCTZ_OBJS:.o=.d) $(TESTS:=.d) $(TOOLS:=.d) $(EXAMPLES:=.d)

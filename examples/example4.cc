@@ -12,12 +12,11 @@
 //   See the License for the specific language governing permissions and
 //   limitations under the License.
 
-#include <chrono>
 #include <iostream>
 #include <string>
 
-#include "cctz/civil_time.h"
-#include "cctz/time_zone.h"
+#include "civil_time.h"
+#include "time_zone.h"
 
 template <typename D>
 cctz::time_point<cctz::sys_seconds> FloorDay(cctz::time_point<D> tp,
@@ -30,6 +29,6 @@ int main() {
   load_time_zone("America/Los_Angeles", &lax);
   const auto now = std::chrono::system_clock::now();
   const auto day = FloorDay(now, lax);
-  std::cout << cctz::format("Now: %Y-%m-%d %H:%M:%S %z\n", now, lax);
-  std::cout << cctz::format("Day: %Y-%m-%d %H:%M:%S %z\n", day, lax);
+  std::cout << cctz::format("Now: %F %T %z\n", now, lax);
+  std::cout << cctz::format("Day: %F %T %z\n", day, lax);
 }
